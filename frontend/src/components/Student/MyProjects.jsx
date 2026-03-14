@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import Navbar from '../Navbar';
 
 const API = "http://localhost:5000/api";
@@ -138,6 +139,7 @@ const styles = {
 
 export default function MyProjects() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const navigate = useNavigate();
   const [projects, setProjects] = useState([]);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -198,15 +200,16 @@ export default function MyProjects() {
 
   const handleConnect = async (receiverId) => {
     try {
-      const res = await fetch(`${API}/connections/request`, {
+      // Use direct-connect so both can message immediately without extra steps
+      const res = await fetch(`${API}/connections/direct-connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requesterId: user.id, receiverId }),
       });
       const data = await res.json();
-      showToast(data.message || "Connect request sent!");
+      showToast(data.message || "Connected! You can now message each other.");
     } catch {
-      showToast("Failed to send connect request", false);
+      showToast("Failed to connect", false);
     }
   };
 
@@ -339,6 +342,19 @@ export default function MyProjects() {
                       onClick={() => handleConnect(req.ApplicantId)}
                     >
                       🤝 Connect
+                    </button>
+                    <button
+                      style={{
+                        padding:"0.55rem 0.9rem", borderRadius:"8px",
+                        border:"none",
+                        background:"linear-gradient(135deg,#2563eb,#1d4ed8)",
+                        color:"#fff",
+                        fontSize:"0.82rem", fontWeight:"700",
+                        cursor:"pointer", fontFamily:"inherit", flexShrink:0,
+                      }}
+                      onClick={async () => { await handleConnect(req.ApplicantId); navigate("/inbox"); }}
+                    >
+                      💬 Message
                     </button>
                   </div>
                 </div>

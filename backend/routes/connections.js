@@ -156,4 +156,61 @@ router.get('/pending/:userId', async (req, res) => {
     }
 });
 
-module.exports = router;
+// --- DIRECT CONNECT (creates Accepted connection immediately, for project leads) ---
+router.post('/direct-connect', async (req, res) => {
+    const { requesterId, receiverId } = req.body;
+    try {
+        const pool = await sql.connect(dbConfig);
+
+        // Check if connection already exists
+        const check = await pool.request()
+            .input('rid', sql.Int, requesterId)
+            .input('rcv', sql.Int, receiverId)
+            .query(`
+                SELECT ConnectionId, Status FROM Connections 
+                WHERE (RequesterId = @rid AND ReceiverId = @rcv)
+                   OR (RequesterId = @rcv AND ReceiverId = @rid)
+            `);
+
+        if (check.recordset.length > 0) {
+            const existing = check.recordset[0];
+            if (existing.Status === 'Accepted') {
+                return res.json({ message: "Already connected! You can message each other." });
+            }
+            // Update existing pending to accepted
+            await pool.request()
+                .input('cid', sql.Int, existing.ConnectionId)
+                .query(`UPDATE Connections SET Status = 'Accepted' WHERE ConnectionId = @cid`);
+            return res.json({ message: "Connection accepted! You can now message each other." });
+        }
+
+        // Insert as Accepted directly
+        await pool.request()
+            .input('rid', sql.Int, requesterId)
+            .input('rcv', sql.Int, receiverId)
+            .query(`INSERT INTO Connections (RequesterId, ReceiverId, Status) VALUES (@rid, @rcv, 'Accepted')`);
+
+        // Notify both users
+        const [req1, req2] = await Promise.all([
+            pool.request().input('uid', sql.Int, requesterId).query(`SELECT FullName FROM Users WHERE UserId = @uid`),
+            pool.request().input('uid', sql.Int, receiverId).query(`SELECT FullName FROM Users WHERE UserId = @uid`),
+        ]);
+
+        const leaderName = req1.recordset[0]?.FullName || 'Project Lead';
+        const studentName = req2.recordset[0]?.FullName || 'Student';
+
+        // Notify the student
+        await pool.request()
+            .input('uid',    sql.Int,      receiverId)
+            .input('sender', sql.Int,      requesterId)
+            .input('type',   sql.NVarChar, 'ConnectionResponse')
+            .input('msg',    sql.NVarChar, `${leaderName} connected with you! You can now message each other in the inbox.`)
+            .query(`INSERT INTO Notifications (UserId, SenderId, Type, Message) VALUES (@uid, @sender, @type, @msg)`);
+
+        res.json({ message: `Connected with ${studentName}! You can now message each other.` });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+module.exports = router;    

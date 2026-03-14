@@ -155,39 +155,31 @@ router.put('/respond/:interestId', async (req, res) => {
                 .query(`UPDATE ProjectRoles SET IsFilled = 1 WHERE RoleId = @rid`);
 
             // Auto-create accepted connection between lead and applicant
-            // Check if one doesn't already exist first
-            const connPool = await sql.connect(dbConfig);
-            const existingConn = await connPool.request()
-                .input('lid', sql.Int, projectId)
-                .input('aid', sql.Int, applicantId)
-                .query(`
-                    SELECT ConnectionId FROM Connections
-                    WHERE (RequesterId = @aid AND ReceiverId = (SELECT LeaderId FROM Projects WHERE ProjectId = @lid))
-                       OR (RequesterId = (SELECT LeaderId FROM Projects WHERE ProjectId = @lid) AND ReceiverId = @aid)
-                `);
+            const projLeader = await pool.request()
+                .input('pid', sql.Int, projectId)
+                .query(`SELECT LeaderId FROM Projects WHERE ProjectId = @pid`);
+            const leaderId = projLeader.recordset[0]?.LeaderId;
 
-            if (existingConn.recordset.length === 0) {
-                // Get the leaderId
-                const projLeader = await connPool.request()
-                    .input('pid', sql.Int, projectId)
-                    .query(`SELECT LeaderId FROM Projects WHERE ProjectId = @pid`);
-                
-                const leaderId = projLeader.recordset[0]?.LeaderId;
+            if (leaderId) {
+                const existingConn = await pool.request()
+                    .input('lid', sql.Int, leaderId)
+                    .input('aid', sql.Int, applicantId)
+                    .query(`
+                        SELECT ConnectionId, Status FROM Connections
+                        WHERE (RequesterId = @lid AND ReceiverId = @aid)
+                           OR (RequesterId = @aid AND ReceiverId = @lid)
+                    `);
 
-                if (leaderId) {
+                if (existingConn.recordset.length === 0) {
                     await new sql.Request(transaction)
                         .input('requester', sql.Int, leaderId)
                         .input('receiver',  sql.Int, applicantId)
-                        .query(`
-                            INSERT INTO Connections (RequesterId, ReceiverId, Status)
-                            VALUES (@requester, @receiver, 'Accepted')
-                        `);
+                        .query(`INSERT INTO Connections (RequesterId, ReceiverId, Status) VALUES (@requester, @receiver, 'Accepted')`);
+                } else if (existingConn.recordset[0].Status !== 'Accepted') {
+                    await new sql.Request(transaction)
+                        .input('cid', sql.Int, existingConn.recordset[0].ConnectionId)
+                        .query(`UPDATE Connections SET Status = 'Accepted' WHERE ConnectionId = @cid`);
                 }
-            } else {
-                // If exists but not accepted, update it
-                await new sql.Request(transaction)
-                    .input('cid', sql.Int, existingConn.recordset[0].ConnectionId)
-                    .query(`UPDATE Connections SET Status = 'Accepted' WHERE ConnectionId = @cid`);
             }
 
             // Reject all other pending interests for the same role
