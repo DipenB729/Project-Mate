@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from "react";
 import Navbar from '../Navbar';
 
@@ -212,6 +213,8 @@ const S = {
 };
 
 export default function BrowseProjects() {
+  const [searchParams] = useSearchParams();
+  const requestedProjectId = searchParams.get("projectId");
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const [projects, setProjects]   = useState([]);
@@ -225,6 +228,22 @@ export default function BrowseProjects() {
   const [toast, setToast]         = useState(null);
   // track which projects this user already applied to (projectId set)
   const [appliedProjects, setAppliedProjects] = useState(new Set());
+
+  // Recommendations open the existing detail modal and reuse its application handler.
+  useEffect(() => {
+    if (!requestedProjectId || !/^[1-9]\d*$/.test(requestedProjectId)) return;
+    const controller = new AbortController();
+    fetch(`${API}/projects/${requestedProjectId}`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('Could not load project');
+        const project = await response.json();
+        if (!project.ProjectId || !project.IsApproved || project.Status !== 'Open') throw new Error('Project is no longer available');
+        setSelected(project); setSelectedRole(null); setMessage('');
+      }).catch(error => {
+        if (error.name !== 'AbortError') setToast({ msg: 'This project is no longer available. Browse other projects below.', ok: false });
+      });
+    return () => controller.abort();
+  }, [requestedProjectId]);
 
   // Load projects
   useEffect(() => {

@@ -1,3 +1,4 @@
+import RecommendationPreferences from './RecommendationPreferences';
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import Navbar from '../Navbar';
@@ -186,6 +187,8 @@ export default function StudentProfile() {
       <div style={{ ...S.container, animation: "fadeUp 0.35s ease" }}>
         <h1 style={S.pageTitle}>Technical Profile</h1>
         <p style={S.pageSub}>Select your skills to get matched with the right projects.</p>
+
+        <RecommendationPreferences />
 
         <div style={S.card}>
           <div style={S.sectionLabel}>Browse & Select Skills</div>
