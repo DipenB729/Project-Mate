@@ -36,6 +36,7 @@ const notificationRoutes = require('./routes/notifications');
 const connectionRoutes   = require('./routes/connections');
 const messageRoutes      = require('./routes/messages');
 
+app.use('/api/recommendations', require('./routes/recommendations')());
 app.use('/api',                authRoutes);
 app.use('/api/admin',          adminRoutes);
 app.use('/api/student',        studentRoutes);

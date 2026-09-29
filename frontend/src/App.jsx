@@ -15,6 +15,8 @@ import MyApplications  from './components/Student/MyApplications';
 import MyProjects      from './components/Student/MyProjects';
 import Inbox           from './components/Student/Inbox';
 
+import RecommendedProjects from './components/Student/RecommendedProjects';
+
 // Admin
 import AdminHome    from './components/Admin/AdminHome';
 import ManageUsers  from './components/Admin/ManageUsers';
@@ -41,6 +43,7 @@ function App() {
                 <Route path="/register" element={<Register />} />
 
                 {/* Student */}
+                <Route path="/recommended-projects" element={<StudentRoute><RecommendedProjects /></StudentRoute>} />
                 <Route path="/student-home"    element={<StudentRoute><StudentHome /></StudentRoute>} />
                 <Route path="/browse-projects" element={<StudentRoute><BrowseProjects /></StudentRoute>} />
                 <Route path="/create-project"  element={<StudentRoute><CreateProject /></StudentRoute>} />

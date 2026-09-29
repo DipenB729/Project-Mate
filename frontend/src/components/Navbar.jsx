@@ -146,6 +146,7 @@ const Navbar = ({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) => {
     // STUDENT NAVBAR
     // ============================================================
     const studentLinks = [
+        { to: "/recommended-projects", label: "Recommended" },
         { to: "/student-home",     label: "Home"            },
         { to: "/browse-projects",  label: "Browse Projects" },
         { to: "/create-project",   label: "Post Vision"     },
