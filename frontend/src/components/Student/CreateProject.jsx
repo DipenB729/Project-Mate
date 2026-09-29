@@ -1,7 +1,8 @@
+import { API, apiFetch, readList } from '../../api/client';
 import { useState, useEffect } from "react";
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const styles = {
   page: {
@@ -165,6 +166,7 @@ const styles = {
 
 export default function CreateProject() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const [loadError, setLoadError] = useState('');
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [skills, setSkills] = useState([]);
@@ -174,10 +176,10 @@ export default function CreateProject() {
   const [toast, setToast] = useState(null);
 
   useEffect(() => {
-    fetch(`${API}/skills`)
-      .then(r => r.json())
+    apiFetch(`${API}/skills`)
+      .then(readList)
       .then(setSkills)
-      .catch(() => {});
+      .catch(() => setLoadError('Unable to load skills. Please refresh to retry.'));
   }, []);
 
   const showToast = (msg, ok = true) => {
@@ -208,7 +210,7 @@ export default function CreateProject() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/projects/create`, {
+      const res = await apiFetch(`${API}/projects/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -242,6 +244,7 @@ export default function CreateProject() {
         .submit-btn:hover { opacity: 0.88; }
       `}</style>
       <Navbar />
+      {loadError && <p role="alert">{loadError}</p>}
 
       <div style={styles.container}>
         <h1 style={styles.pageTitle}>Create a Project</h1>

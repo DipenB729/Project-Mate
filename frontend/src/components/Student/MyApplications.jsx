@@ -1,8 +1,9 @@
+import { API, apiFetch, readList } from '../../api/client';
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const statusStyle = {
   Pending:  { bg: "rgba(251,191,36,0.1)",  color: "#fbbf24", border: "rgba(251,191,36,0.3)" },
@@ -56,8 +57,8 @@ export default function MyApplications() {
 
   useEffect(() => {
     if (!user.id) return;
-    fetch(`${API}/interests/my-applications/${user.id}`)
-      .then(r => r.json())
+    apiFetch(`${API}/interests/my-applications/${user.id}`)
+      .then(readList)
       .then(data => {
         const list = Array.isArray(data) ? data : [];
         // Debug: show what fields we're actually getting

@@ -1,14 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
+
+router.use(authenticate);
 
 // --- CREATE PROJECT (Student as Lead) ---
-router.post('/create', async (req, res) => {
+router.post('/create', requireRole('Student'), actor('leaderId'), async (req, res) => {
     const { title, description, leaderId, roles } = req.body;
-    // roles = [{ roleName, requiredSkillId }, ...]
+    if (typeof title !== 'string' || !title.trim() || typeof description !== 'string' || !description.trim() ||
+        !Array.isArray(roles) || !roles.length || roles.some(r => typeof r.roleName !== 'string' || !r.roleName.trim()))
+        return res.status(400).json({ message: 'Title, description and valid roles are required.' });
+    let transaction;
     try {
         const pool = await sql.connect(dbConfig);
-        const transaction = new sql.Transaction(pool);
+        transaction = new sql.Transaction(pool);
         await transaction.begin();
 
         // Insert project
@@ -48,7 +54,8 @@ router.post('/create', async (req, res) => {
         await transaction.commit();
         res.status(201).json({ message: "Project created successfully! Awaiting admin approval.", projectId });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        if (transaction) { try { await transaction.rollback(); } catch {} }
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -57,7 +64,7 @@ router.get('/browse', async (req, res) => {
     try {
         const pool = await sql.connect(dbConfig);
         const projects = await pool.request().query(`
-            SELECT 
+            SELECT
                 p.ProjectId, p.Title, p.Description, p.Status, p.CreatedAt,
                 u.FullName AS LeaderName, u.ProfilePic AS LeaderPic
             FROM Projects p
@@ -80,7 +87,7 @@ router.get('/browse', async (req, res) => {
 
         res.json(result);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -97,6 +104,11 @@ router.get('/:projectId', async (req, res) => {
                 JOIN Users u ON p.LeaderId = u.UserId
                 WHERE p.ProjectId = @pid
             `);
+
+        if (!project.recordset.length) return res.status(404).json({ message: 'Project not found.' });
+        const item = project.recordset[0];
+        if (!item.IsApproved && item.LeaderId !== req.user.id && req.user.role !== 'Admin')
+            return res.status(403).json({ message: 'Project is unavailable.' });
 
         const roles = await pool.request()
             .input('pid', sql.Int, req.params.projectId)
@@ -122,7 +134,7 @@ router.get('/:projectId', async (req, res) => {
             members: members.recordset
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -143,12 +155,12 @@ router.get('/my-projects/:leaderId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- ADMIN: GET ALL PROJECTS (pending + approved) ---
-router.get('/admin/all', async (req, res) => {
+router.get('/admin/all', requireRole('Admin'), async (req, res) => {
     try {
         const pool = await sql.connect(dbConfig);
         const result = await pool.request().query(`
@@ -159,25 +171,25 @@ router.get('/admin/all', async (req, res) => {
         `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- ADMIN: APPROVE PROJECT ---
-router.put('/admin/approve/:projectId', async (req, res) => {
+router.put('/admin/approve/:projectId', requireRole('Admin'), async (req, res) => {
     try {
         const pool = await sql.connect(dbConfig);
         await pool.request()
             .input('pid', sql.Int, req.params.projectId)
-            .query(`UPDATE Projects SET IsApproved = 1 WHERE ProjectId = @pid`);
+            .query(`UPDATE Projects SET IsApproved = 1, Status = 'Open' WHERE ProjectId = @pid`);
         res.json({ message: "Project approved successfully" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- ADMIN: REJECT / REVOKE PROJECT ---
-router.put('/admin/reject/:projectId', async (req, res) => {
+router.put('/admin/reject/:projectId', requireRole('Admin'), async (req, res) => {
     try {
         const pool = await sql.connect(dbConfig);
         await pool.request()
@@ -185,12 +197,12 @@ router.put('/admin/reject/:projectId', async (req, res) => {
             .query(`UPDATE Projects SET IsApproved = 0, Status = 'Closed' WHERE ProjectId = @pid`);
         res.json({ message: "Project rejected" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- ADMIN: GET STATS ---
-router.get('/admin/stats', async (req, res) => {
+router.get('/admin/stats', requireRole('Admin'), async (req, res) => {
     try {
         const pool = await sql.connect(dbConfig);
         const result = await pool.request().query(`
@@ -198,13 +210,15 @@ router.get('/admin/stats', async (req, res) => {
                 (SELECT COUNT(*) FROM Projects)                        AS totalProjects,
                 (SELECT COUNT(*) FROM Projects WHERE IsApproved = 0)   AS pendingProjects,
                 (SELECT COUNT(*) FROM Projects WHERE IsApproved = 1)   AS approvedProjects,
-                (SELECT COUNT(*) FROM Users WHERE RoleId = 2 AND IsDeleted = 0) AS activeStudents,
+                (SELECT COUNT(*) FROM Users WHERE RoleId = 2 AND IsActive = 1 AND IsDeleted = 0) AS activeStudents,
                 (SELECT COUNT(*) FROM Interests WHERE Status = 'Pending') AS pendingInterests
         `);
         res.json(result.recordset[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
+
+router.param('leaderId', ownParam);
 
 module.exports = router;

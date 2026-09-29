@@ -1,7 +1,8 @@
+import { API, apiFetch, readList } from '../../api/client';
 import { useState, useEffect, useRef } from "react";
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const S = {
   page: { minHeight:"100vh", background:"linear-gradient(135deg,#0f172a 0%,#1e293b 60%,#0f172a 100%)", fontFamily:"'Georgia','Times New Roman',serif", color:"#e2e8f0", display:"flex", flexDirection:"column" },
@@ -61,9 +62,9 @@ export default function Inbox() {
   const fetchSidebar = async () => {
     try {
       const [convs, conns, pending] = await Promise.all([
-        fetch(`${API}/messages/inbox/${user.id}`).then(r => r.json()),
-        fetch(`${API}/connections/my-connections/${user.id}`).then(r => r.json()),
-        fetch(`${API}/connections/pending/${user.id}`).then(r => r.json()),
+        apiFetch(`${API}/messages/inbox/${user.id}`).then(readList),
+        apiFetch(`${API}/connections/my-connections/${user.id}`).then(readList),
+        apiFetch(`${API}/connections/pending/${user.id}`).then(readList),
       ]);
       setConversations(Array.isArray(convs)    ? convs    : []);
       setConnections  (Array.isArray(conns)    ? conns    : []);
@@ -90,7 +91,7 @@ export default function Inbox() {
     if (!targetId) return;
     if (!silent) setLoadingChat(true);
     try {
-      const res  = await fetch(`${API}/messages/conversation/${user.id}/${targetId}`);
+      const res  = await apiFetch(`${API}/messages/conversation/${user.id}/${targetId}`);
       const data = await res.json();
       setMessages(Array.isArray(data) ? data : []);
       // Update unread count in sidebar
@@ -120,7 +121,7 @@ export default function Inbox() {
     setMessages(prev => [...prev, temp]);
 
     try {
-      const res = await fetch(`${API}/messages/send`, {
+      const res = await apiFetch(`${API}/messages/send`, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ senderId:user.id, receiverId:targetId, body }),
@@ -149,7 +150,7 @@ export default function Inbox() {
   // ── Connection request response ──────────────────────────────
   const respondToConnection = async (connectionId, status, requesterId) => {
     try {
-      await fetch(`${API}/connections/respond/${connectionId}`, {
+      await apiFetch(`${API}/connections/respond/${connectionId}`, {
         method:"PUT",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ status, requesterId, receiverId:user.id }),

@@ -1,5 +1,6 @@
+import { API } from '../../api/client';
 import React, { useState } from 'react';
-import axios from 'axios';
+import axios from '../../api/client';
 import { useNavigate, Link } from 'react-router-dom';
 import '../../styles/Register.css'; // Path update for folder structure
 
@@ -13,7 +14,7 @@ const Register = () => {
         setError(""); // Reset error
 
         try {
-            await axios.post('http://localhost:5000/api/register', formData);
+            await axios.post(`${API}/register`, formData);
             alert("Registration successful! Redirecting to login...");
             navigate('/');
         } catch (err) {
@@ -26,40 +27,40 @@ const Register = () => {
             <div className="register-card">
                 <h2 className="register-title">Join Project-Mate</h2>
                 <p className="register-subtitle">Find the perfect team for your academic projects.</p>
-                
+
                 {error && <div className="error-box">{error}</div>}
 
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label>Full Name</label>
-                        <input 
-                            type="text" 
+                        <input
+                            type="text"
                             className="register-input"
-                            placeholder="John Doe" 
-                            onChange={(e) => setFormData({...formData, fullName: e.target.value})} 
-                            required 
+                            placeholder="John Doe"
+                            onChange={(e) => setFormData({...formData, fullName: e.target.value})}
+                            required
                         />
                     </div>
 
                     <div className="form-group">
                         <label>College Email</label>
-                        <input 
-                            type="email" 
+                        <input
+                            type="email"
                             className="register-input"
-                            placeholder="name@college.edu" 
-                            onChange={(e) => setFormData({...formData, email: e.target.value})} 
-                            required 
+                            placeholder="name@college.edu"
+                            onChange={(e) => setFormData({...formData, email: e.target.value})}
+                            required
                         />
                     </div>
 
                     <div className="form-group">
                         <label>Password</label>
-                        <input 
-                            type="password" 
+                        <input
+                            type="password"
                             className="register-input"
-                            placeholder="Create a strong password" 
-                            onChange={(e) => setFormData({...formData, password: e.target.value})} 
-                            required 
+                            placeholder="Create a strong password"
+                            onChange={(e) => setFormData({...formData, password: e.target.value})}
+                            required
                         />
                     </div>
 

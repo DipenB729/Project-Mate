@@ -1,12 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
+
+router.use(authenticate, requireRole('Student'));
+
+router.get('/unread-count/:userId', async (req, res) => {
+    try {
+        const pool = await sql.connect(dbConfig);
+        const result = await pool.request().input('uid', sql.Int, req.user.id)
+            .query('SELECT COUNT(*) AS count FROM Messages WHERE ReceiverId = @uid AND IsRead = 0');
+        res.json({ count: result.recordset[0].count });
+    } catch (err) { res.status(500).json({ message: 'Unable to load unread messages.' }); }
+});
 
 // --- SEND A MESSAGE ---
-router.post('/send', async (req, res) => {
+router.post('/send', actor('senderId'), async (req, res) => {
     const { senderId, receiverId, body } = req.body;
 
-    if (!body || body.trim() === "") return res.status(400).json({ message: "Message body cannot be empty" });
+    if (typeof body !== 'string' || body.trim() === "") return res.status(400).json({ message: "Message body cannot be empty" });
     if (senderId === receiverId) return res.status(400).json({ message: "You cannot message yourself" });
 
     try {
@@ -56,7 +68,7 @@ router.post('/send', async (req, res) => {
 
         res.json(newMessage);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -85,7 +97,7 @@ router.get('/conversation/:userId/:otherUserId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -96,7 +108,7 @@ router.get('/inbox/:userId', async (req, res) => {
         const result = await pool.request()
             .input('uid', sql.Int, req.params.userId)
             .query(`
-                SELECT 
+                SELECT
                     u.UserId AS OtherUserId, u.FullName, u.ProfilePic,
                     latest.Body AS LastMessage, latest.SentAt AS LastMessageAt,
                     (SELECT COUNT(*) FROM Messages WHERE ReceiverId = @uid AND SenderId = u.UserId AND IsRead = 0) AS UnreadCount
@@ -110,8 +122,10 @@ router.get('/inbox/:userId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
+
+router.param('userId', ownParam);
 
 module.exports = router;

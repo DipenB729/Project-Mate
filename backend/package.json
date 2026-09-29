@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
-    "benchmark": "node tests/recommendation.benchmark.js"
+    "benchmark": "node tests/recommendation.benchmark.js",
+    "migrate": "node scripts/migrate.js"
   },
   "keywords": [],
   "author": "",

@@ -1,8 +1,9 @@
+import { API, apiFetch, readList } from '../../api/client';
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const styles = {
   page: {
@@ -140,6 +141,7 @@ const styles = {
 export default function MyProjects() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const navigate = useNavigate();
+  const [loadError, setLoadError] = useState('');
   const [projects, setProjects] = useState([]);
   const [requests, setRequests] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -158,19 +160,19 @@ export default function MyProjects() {
   useEffect(() => {
     if (!user.id) return;
     Promise.all([
-      fetch(`${API}/projects/my-projects/${user.id}`).then(r => r.json()),
-      fetch(`${API}/interests/incoming/${user.id}`).then(r => r.json()),
+      apiFetch(`${API}/projects/my-projects/${user.id}`).then(readList),
+      apiFetch(`${API}/interests/incoming/${user.id}`).then(readList),
     ]).then(([projs, reqs]) => {
       setProjects(projs);
       setRequests(reqs);
       setLoading(false);
-    }).catch(() => setLoading(false));
+    }).catch(() => { setLoading(false); setLoadError('Unable to load projects. Please refresh to retry.'); });
   }, [user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRespond = async (interest, status) => {
     setResponding(interest.InterestId);
     try {
-      const res = await fetch(`${API}/interests/respond/${interest.InterestId}`, {
+      const res = await apiFetch(`${API}/interests/respond/${interest.InterestId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -186,7 +188,7 @@ export default function MyProjects() {
         setRequests(prev => prev.filter(r => r.InterestId !== interest.InterestId));
         showToast(`Application ${status.toLowerCase()} successfully`);
         if (status === "Accepted") {
-          const updated = await fetch(`${API}/projects/my-projects/${user.id}`).then(r => r.json());
+          const updated = await apiFetch(`${API}/projects/my-projects/${user.id}`).then(readList);
           setProjects(updated);
         }
       } else {
@@ -201,15 +203,18 @@ export default function MyProjects() {
   const handleConnect = async (receiverId) => {
     try {
       // Use direct-connect so both can message immediately without extra steps
-      const res = await fetch(`${API}/connections/direct-connect`, {
+      const res = await apiFetch(`${API}/connections/direct-connect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requesterId: user.id, receiverId }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to connect");
       showToast(data.message || "Connected! You can now message each other.");
+      return true;
     } catch {
       showToast("Failed to connect", false);
+      return false;
     }
   };
 
@@ -225,6 +230,7 @@ export default function MyProjects() {
       `}</style>
 
       <Navbar isSidebarOpen={false} setIsSidebarOpen={() => {}} />
+      {loadError && <p role="alert">{loadError}</p>}
 
       <div style={styles.container}>
 
@@ -352,7 +358,7 @@ export default function MyProjects() {
                         fontSize:"0.82rem", fontWeight:"700",
                         cursor:"pointer", fontFamily:"inherit", flexShrink:0,
                       }}
-                      onClick={async () => { await handleConnect(req.ApplicantId); navigate("/inbox"); }}
+                      onClick={async () => { if (await handleConnect(req.ApplicantId)) navigate("/inbox"); }}
                     >
                       💬 Message
                     </button>

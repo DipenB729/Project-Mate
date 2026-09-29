@@ -1,70 +1,43 @@
 const express = require('express');
 const router = express.Router();
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
+
+router.use(authenticate, requireRole('Student'));
 
 // --- APPLY FOR A ROLE (Express Interest) ---
-router.post('/apply', async (req, res) => {
+router.post('/apply', actor('applicantId'), async (req, res) => {
     const { projectId, roleId, applicantId, message } = req.body;
+    let transaction;
     try {
         const pool = await sql.connect(dbConfig);
-
-        // Prevent duplicate application
-        const check = await pool.request()
-            .input('pid', sql.Int, projectId)
-            .input('rid', sql.Int, roleId)
-            .input('aid', sql.Int, applicantId)
-            .query(`
-                SELECT * FROM Interests 
-                WHERE ProjectId = @pid AND RoleId = @rid AND ApplicantId = @aid
-            `);
-
-        if (check.recordset.length > 0)
-            return res.status(400).json({ message: "You have already applied for this role." });
-
-        // Check role is not already filled
-        const roleCheck = await pool.request()
-            .input('rid', sql.Int, roleId)
-            .query(`SELECT IsFilled FROM ProjectRoles WHERE RoleId = @rid`);
-
-        if (roleCheck.recordset[0]?.IsFilled)
-            return res.status(400).json({ message: "This role has already been filled." });
-
-        await pool.request()
-            .input('pid', sql.Int, projectId)
-            .input('rid', sql.Int, roleId)
-            .input('aid', sql.Int, applicantId)
-            .input('msg', sql.NVarChar, message || null)
-            .query(`
-                INSERT INTO Interests (ProjectId, RoleId, ApplicantId, Message, Status)
-                VALUES (@pid, @rid, @aid, @msg, 'Pending')
-            `);
-
-        // --- Auto-notify the project lead ---
-        const projInfo = await pool.request()
-            .input('pid', sql.Int, projectId)
-            .query(`
-                SELECT p.LeaderId, p.Title, u.FullName AS ApplicantName
-                FROM Projects p
-                JOIN Users u ON u.UserId = ${applicantId}
-                WHERE p.ProjectId = @pid
-            `);
-
-        if (projInfo.recordset.length > 0) {
-            const { LeaderId, Title, ApplicantName } = projInfo.recordset[0];
-            await pool.request()
-                .input('uid',    sql.Int,      LeaderId)
-                .input('sender', sql.Int,      applicantId)
-                .input('type',   sql.NVarChar, 'NewInterest')
-                .input('notifMsg', sql.NVarChar, `${ApplicantName} is interested in joining your project "${Title}"`)
-                .query(`
-                    INSERT INTO Notifications (UserId, SenderId, Type, Message)
-                    VALUES (@uid, @sender, @type, @notifMsg)
-                `);
+        transaction = new sql.Transaction(pool);
+        await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+        const role = await new sql.Request(transaction)
+            .input('pid', sql.Int, projectId).input('rid', sql.Int, roleId).input('uid', sql.Int, applicantId)
+            .query(`SELECT p.LeaderId, p.Title FROM Projects p WITH (UPDLOCK, HOLDLOCK)
+                JOIN ProjectRoles pr WITH (UPDLOCK, HOLDLOCK) ON pr.ProjectId = p.ProjectId
+                WHERE p.ProjectId = @pid AND pr.RoleId = @rid AND pr.IsFilled = 0
+                AND p.IsApproved = 1 AND p.Status = 'Open' AND p.LeaderId <> @uid
+                AND NOT EXISTS (SELECT 1 FROM TeamMembers WHERE ProjectId = @pid AND UserId = @uid)
+                AND NOT EXISTS (SELECT 1 FROM Interests WHERE ProjectId = @pid AND RoleId = @rid AND ApplicantId = @uid)`);
+        if (!role.recordset.length) {
+            await transaction.rollback();
+            return res.status(409).json({ message: 'Role unavailable or application already exists.' });
         }
-
-        res.status(201).json({ message: "Interest submitted successfully!" });
+        await new sql.Request(transaction).input('pid', sql.Int, projectId).input('rid', sql.Int, roleId)
+            .input('aid', sql.Int, applicantId).input('msg', sql.NVarChar, message || null)
+            .query(`INSERT INTO Interests (ProjectId, RoleId, ApplicantId, Message, Status)
+                VALUES (@pid, @rid, @aid, @msg, 'Pending')`);
+        await new sql.Request(transaction).input('uid', sql.Int, role.recordset[0].LeaderId)
+            .input('sender', sql.Int, applicantId)
+            .input('msg', sql.NVarChar, `New application for "${role.recordset[0].Title}"`)
+            .query(`INSERT INTO Notifications (UserId, SenderId, Type, Message) VALUES (@uid, @sender, 'NewInterest', @msg)`);
+        await transaction.commit();
+        res.status(201).json({ message: 'Interest submitted successfully!' });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        if (transaction) { try { await transaction.rollback(); } catch {} }
+        res.status(500).json({ message: 'Unable to submit application.' });
     }
 });
 
@@ -75,7 +48,7 @@ router.get('/my-applications/:applicantId', async (req, res) => {
         const result = await pool.request()
             .input('aid', sql.Int, req.params.applicantId)
             .query(`
-                SELECT 
+                SELECT
                     i.InterestId                AS InterestId,
                     CAST(i.Status AS NVARCHAR)  AS InterestStatus,
                     i.Message                   AS AppMessage,
@@ -94,7 +67,7 @@ router.get('/my-applications/:applicantId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -105,7 +78,7 @@ router.get('/incoming/:leaderId', async (req, res) => {
         const result = await pool.request()
             .input('lid', sql.Int, req.params.leaderId)
             .query(`
-                SELECT 
+                SELECT
                     i.InterestId, i.Status, i.Message, i.CreatedAt,
                     p.Title AS ProjectTitle, p.ProjectId,
                     pr.RoleName, pr.RoleId,
@@ -119,118 +92,64 @@ router.get('/incoming/:leaderId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- ACCEPT OR REJECT INTEREST (Project Lead) ---
 router.put('/respond/:interestId', async (req, res) => {
-    const { status, applicantId, projectId, roleId, roleName } = req.body;
-    // status = 'Accepted' or 'Rejected'
+    const { status } = req.body;
+    if (!['Accepted', 'Rejected'].includes(status)) return res.status(400).json({ message: 'Invalid response status.' });
+    let transaction;
     try {
         const pool = await sql.connect(dbConfig);
-        const transaction = new sql.Transaction(pool);
-        await transaction.begin();
-
-        // Update interest status
-        await new sql.Request(transaction)
-            .input('iid', sql.Int, req.params.interestId)
-            .input('status', sql.NVarChar, status)
-            .query(`UPDATE Interests SET Status = @status WHERE InterestId = @iid`);
-
+        transaction = new sql.Transaction(pool);
+        await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
+        const found = await new sql.Request(transaction).input('iid', sql.Int, req.params.interestId)
+            .input('uid', sql.Int, req.user.id).query(`
+                SELECT i.*, pr.RoleName, pr.IsFilled, p.IsApproved, p.Status AS ProjectStatus
+                FROM Interests i WITH (UPDLOCK, HOLDLOCK)
+                JOIN Projects p WITH (UPDLOCK, HOLDLOCK) ON p.ProjectId = i.ProjectId
+                JOIN ProjectRoles pr WITH (UPDLOCK, HOLDLOCK) ON pr.RoleId = i.RoleId AND pr.ProjectId = i.ProjectId
+                WHERE i.InterestId = @iid AND p.LeaderId = @uid`);
+        const interest = found.recordset[0];
+        if (!interest) {
+            await transaction.rollback();
+            return res.status(404).json({ message: 'Application not found.' });
+        }
+        if (interest.Status !== 'Pending' || (status === 'Accepted' && (interest.IsFilled || !interest.IsApproved || interest.ProjectStatus !== 'Open'))) {
+            await transaction.rollback();
+            return res.status(409).json({ message: 'Application or role is no longer available.' });
+        }
+        const request = () => new sql.Request(transaction)
+            .input('iid', sql.Int, interest.InterestId).input('pid', sql.Int, interest.ProjectId)
+            .input('rid', sql.Int, interest.RoleId).input('aid', sql.Int, interest.ApplicantId)
+            .input('lid', sql.Int, req.user.id);
         if (status === 'Accepted') {
-            // Add to TeamMembers
-            await new sql.Request(transaction)
-                .input('pid', sql.Int, projectId)
-                .input('uid', sql.Int, applicantId)
-                .input('role', sql.NVarChar, roleName)
-                .query(`
-                    INSERT INTO TeamMembers (ProjectId, UserId, RoleName)
-                    VALUES (@pid, @uid, @role)
-                `);
-
-            // Mark role as filled
-            await new sql.Request(transaction)
-                .input('rid', sql.Int, roleId)
-                .query(`UPDATE ProjectRoles SET IsFilled = 1 WHERE RoleId = @rid`);
-
-            // Auto-create accepted connection between lead and applicant
-            const projLeader = await pool.request()
-                .input('pid', sql.Int, projectId)
-                .query(`SELECT LeaderId FROM Projects WHERE ProjectId = @pid`);
-            const leaderId = projLeader.recordset[0]?.LeaderId;
-
-            if (leaderId) {
-                const existingConn = await pool.request()
-                    .input('lid', sql.Int, leaderId)
-                    .input('aid', sql.Int, applicantId)
-                    .query(`
-                        SELECT ConnectionId, Status FROM Connections
-                        WHERE (RequesterId = @lid AND ReceiverId = @aid)
-                           OR (RequesterId = @aid AND ReceiverId = @lid)
-                    `);
-
-                if (existingConn.recordset.length === 0) {
-                    await new sql.Request(transaction)
-                        .input('requester', sql.Int, leaderId)
-                        .input('receiver',  sql.Int, applicantId)
-                        .query(`INSERT INTO Connections (RequesterId, ReceiverId, Status) VALUES (@requester, @receiver, 'Accepted')`);
-                } else if (existingConn.recordset[0].Status !== 'Accepted') {
-                    await new sql.Request(transaction)
-                        .input('cid', sql.Int, existingConn.recordset[0].ConnectionId)
-                        .query(`UPDATE Connections SET Status = 'Accepted' WHERE ConnectionId = @cid`);
-                }
+            const member = await request().query('SELECT UserId FROM TeamMembers WITH (UPDLOCK, HOLDLOCK) WHERE ProjectId = @pid AND UserId = @aid');
+            if (member.recordset.length) {
+                await transaction.rollback();
+                return res.status(409).json({ message: 'Applicant is already a team member.' });
             }
-
-            // Reject all other pending interests for the same role
-            await new sql.Request(transaction)
-                .input('rid', sql.Int, roleId)
-                .input('iid', sql.Int, req.params.interestId)
-                .query(`
-                    UPDATE Interests SET Status = 'Rejected'
-                    WHERE RoleId = @rid AND InterestId != @iid AND Status = 'Pending'
-                `);
+            await request().input('role', sql.NVarChar, interest.RoleName).query(`
+                INSERT INTO TeamMembers (ProjectId, UserId, RoleName) VALUES (@pid, @aid, @role);
+                UPDATE ProjectRoles SET IsFilled = 1 WHERE RoleId = @rid AND ProjectId = @pid;
+                UPDATE Interests SET Status = 'Rejected' WHERE Status = 'Pending' AND InterestId <> @iid
+                    AND (RoleId = @rid OR (ProjectId = @pid AND ApplicantId = @aid));
+                IF EXISTS (SELECT 1 FROM Connections WITH (UPDLOCK, HOLDLOCK)
+                    WHERE (RequesterId = @lid AND ReceiverId = @aid) OR (RequesterId = @aid AND ReceiverId = @lid))
+                    UPDATE Connections SET Status = 'Accepted'
+                    WHERE (RequesterId = @lid AND ReceiverId = @aid) OR (RequesterId = @aid AND ReceiverId = @lid);
+                ELSE INSERT INTO Connections (RequesterId, ReceiverId, Status) VALUES (@lid, @aid, 'Accepted');`);
         }
-
+        await request().input('status', sql.NVarChar, status).input('msg', sql.NVarChar, `Your project application was ${status.toLowerCase()}.`)
+            .query(`UPDATE Interests SET Status = @status WHERE InterestId = @iid;
+                INSERT INTO Notifications (UserId, SenderId, Type, Message) VALUES (@aid, @lid, @status, @msg);`);
         await transaction.commit();
-
-        // Notify applicant of the decision
-        try {
-            const notifPool = await sql.connect(dbConfig);
-
-            // Get project title and leader name
-            const info = await notifPool.request()
-                .input('pid', sql.Int, projectId)
-                .query(`
-                    SELECT p.Title, u.FullName AS LeaderName, p.LeaderId
-                    FROM Projects p
-                    JOIN Users u ON p.LeaderId = u.UserId
-                    WHERE p.ProjectId = @pid
-                `);
-
-            if (info.recordset.length > 0) {
-                const { Title, LeaderName, LeaderId } = info.recordset[0];
-                const msg = status === 'Accepted'
-                    ? `🎉 You were accepted for a role in "${Title}"! You can now message ${LeaderName} in your inbox.`
-                    : `Your application for "${Title}" was not accepted this time.`;
-
-                await notifPool.request()
-                    .input('uid',    sql.Int,      applicantId)
-                    .input('sender', sql.Int,      LeaderId)
-                    .input('type',   sql.NVarChar, status)
-                    .input('msg',    sql.NVarChar, msg)
-                    .query(`
-                        INSERT INTO Notifications (UserId, SenderId, Type, Message)
-                        VALUES (@uid, @sender, @type, @msg)
-                    `);
-            }
-        } catch (notifErr) {
-            console.error("Notification error:", notifErr.message);
-        }
-
         res.json({ message: `Application ${status} successfully` });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        if (transaction) { try { await transaction.rollback(); } catch {} }
+        res.status(500).json({ message: 'Unable to respond to application.' });
     }
 });
 
@@ -241,7 +160,7 @@ router.get('/my-team/:userId', async (req, res) => {
         const result = await pool.request()
             .input('uid', sql.Int, req.params.userId)
             .query(`
-                SELECT 
+                SELECT
                     p.ProjectId, p.Title, p.Description, p.Status,
                     tm.RoleName AS MyRole, tm.JoinedAt,
                     u.FullName AS LeaderName, u.ProfilePic AS LeaderPic
@@ -253,8 +172,12 @@ router.get('/my-team/:userId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
+
+router.param('applicantId', ownParam);
+router.param('leaderId', ownParam);
+router.param('userId', ownParam);
 
 module.exports = router;

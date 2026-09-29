@@ -1,8 +1,9 @@
+import { API, apiFetch, readList } from '../../api/client';
 import { useSearchParams } from 'react-router-dom';
 import { useState, useEffect } from "react";
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const S = {
   page: {
@@ -213,6 +214,7 @@ const S = {
 };
 
 export default function BrowseProjects() {
+  const [loadError, setLoadError] = useState('');
   const [searchParams] = useSearchParams();
   const requestedProjectId = searchParams.get("projectId");
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -233,7 +235,7 @@ export default function BrowseProjects() {
   useEffect(() => {
     if (!requestedProjectId || !/^[1-9]\d*$/.test(requestedProjectId)) return;
     const controller = new AbortController();
-    fetch(`${API}/projects/${requestedProjectId}`, { signal: controller.signal })
+    apiFetch(`${API}/projects/${requestedProjectId}`, { signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error('Could not load project');
         const project = await response.json();
@@ -247,17 +249,17 @@ export default function BrowseProjects() {
 
   // Load projects
   useEffect(() => {
-    fetch(`${API}/projects/browse`)
-      .then(r => r.json())
+    apiFetch(`${API}/projects/browse`)
+      .then(readList)
       .then(data => { setProjects(data); setFiltered(data); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch(() => { setLoading(false); setLoadError('Unable to load projects. Please refresh to retry.'); });
   }, []);
 
   // Load already-applied projects for this user
   useEffect(() => {
     if (!user.id) return;
-    fetch(`${API}/interests/my-applications/${user.id}`)
-      .then(r => r.json())
+    apiFetch(`${API}/interests/my-applications/${user.id}`)
+      .then(readList)
       .then(data => {
         const ids = new Set(data.map(a => a.ProjectId));
         setAppliedProjects(ids);
@@ -286,8 +288,9 @@ export default function BrowseProjects() {
   const openProject = async (proj) => {
     // Don't open own project with apply option - still allow viewing
     try {
-      const res = await fetch(`${API}/projects/${proj.ProjectId}`);
+      const res = await apiFetch(`${API}/projects/${proj.ProjectId}`);
       const data = await res.json();
+      if (!res.ok || !data.ProjectId) throw new Error('Project unavailable');
       setSelected(data);
       setSelectedRole(null);
       setMessage("");
@@ -303,7 +306,7 @@ export default function BrowseProjects() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch(`${API}/interests/apply`, {
+      const res = await apiFetch(`${API}/interests/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -350,6 +353,7 @@ export default function BrowseProjects() {
       `}</style>
 
       <Navbar />
+      {loadError && <p role="alert">{loadError}</p>}
 
       <div style={S.container}>
         <h1 style={S.pageTitle}>Browse Projects</h1>

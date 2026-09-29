@@ -1,9 +1,11 @@
+import { API } from '../../api/client';
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import axios from '../../api/client';
 import Navbar from '../Navbar';
 
 const ManageUsers = () => {
     const [users, setUsers] = useState([]);
+    const [error, setError] = useState('');
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
     useEffect(() => {
@@ -11,16 +13,20 @@ const ManageUsers = () => {
     }, []);
 
     const fetchUsers = async () => {
-        const res = await axios.get('http://localhost:5000/api/admin/users');
-        setUsers(res.data);
+        try {
+        const res = await axios.get(`${API}/admin/users`);
+        setUsers(Array.isArray(res.data) ? res.data : []);
+            setError('');
+        } catch { setError('Unable to load data. Please refresh to retry.'); }
     };
 
     const toggleStatus = async (userId, currentStatus) => {
-        await axios.put('http://localhost:5000/api/admin/users/status', {
+        try { await axios.put(`${API}/admin/users/status`, {
             userId,
             isActive: !currentStatus
         });
-        fetchUsers(); // Refresh list
+        await fetchUsers();
+        } catch { setError('Unable to update user. Please try again.'); }
     };
 
     return (
@@ -28,6 +34,7 @@ const ManageUsers = () => {
             <Navbar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
             <main className={`admin-content ${!isSidebarOpen ? 'expanded' : ''}`}>
                 <h2>User Management</h2>
+                {error && <p role="alert">{error}</p>}
                 <table className="admin-table">
                     <thead>
                         <tr>
@@ -48,7 +55,7 @@ const ManageUsers = () => {
                                     </span>
                                 </td>
                                 <td>
-                                   <button 
+                                   <button
                                    className={user.IsActive && !user.IsDeleted ? 'btn-suspend' : 'btn-activate'}
                                onClick={() => toggleStatus(user.UserId, user.IsActive && !user.IsDeleted)}>
                                       {user.IsActive && !user.IsDeleted ? 'Suspend' : 'Activate'}
