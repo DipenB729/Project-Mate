@@ -1,18 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
+
+router.use(authenticate, requireRole('Admin'));
 
 // --- GET ALL USERS ---
 router.get('/users', async (req, res) => {
     try {
         const pool = await sql.connect(dbConfig);
         const result = await pool.request().query(`
-            SELECT UserId, FullName, Email, RoleId, IsActive, IsDeleted, CreatedAt 
+            SELECT UserId, FullName, Email, RoleId, IsActive, IsDeleted, CreatedAt
             FROM Users
         `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -30,14 +33,14 @@ router.put('/users/status', async (req, res) => {
             .input('active', sql.Bit, newIsActive)
             .input('deleted', sql.Bit, newIsDeleted)
             .query(`
-                UPDATE Users 
-                SET IsActive = @active, IsDeleted = @deleted, IsModified = GETDATE() 
+                UPDATE Users
+                SET IsActive = @active, IsDeleted = @deleted, IsModified = GETDATE()
                 WHERE UserId = @uid
             `);
 
         res.json({ message: "User status updated successfully" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -60,7 +63,7 @@ router.post('/skills', async (req, res) => {
 
         res.json({ message: "Skill added successfully" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 

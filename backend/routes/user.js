@@ -1,18 +1,21 @@
 const express = require('express');
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
 
 // Note: `upload` middleware is passed in from server.js
 // so we export a factory function that accepts it
 module.exports = (upload) => {
-    const router = express.Router(); // create INSIDE the factory
+    const router = express.Router();
+    router.use(authenticate);
+    router.param('userId', ownParam);
 
     // --- UPDATE PROFILE ---
-    router.put('/update-profile', upload.single('profilePic'), async (req, res) => {
+    router.put('/update-profile', upload.single('profilePic'), actor('userId'), async (req, res) => {
         try {
             const { userId, fullName, address, existingPic } = req.body;
 
-            console.log("Update Request Body:", req.body);
-            console.log("Uploaded File:", req.file);
+
+
 
             if (!userId) return res.status(400).json({ error: "User ID is missing" });
 
@@ -28,8 +31,8 @@ module.exports = (upload) => {
                 .input('address', sql.NVarChar, address || null)
                 .input('pic', sql.NVarChar, profilePicPath || null)
                 .query(`
-                    UPDATE Users 
-                    SET FullName = @name, Address = @address, ProfilePic = @pic, IsModified = GETDATE() 
+                    UPDATE Users
+                    SET FullName = @name, Address = @address, ProfilePic = @pic, IsModified = GETDATE()
                     WHERE UserId = @uid
                 `);
 
@@ -40,7 +43,7 @@ module.exports = (upload) => {
             });
         } catch (err) {
             console.error("DETAILED SQL ERROR:", err);
-            res.status(500).json({ error: err.message });
+            res.status(500).json({ message: 'Request failed. Please try again.' });
         }
     });
 
@@ -53,7 +56,7 @@ module.exports = (upload) => {
                 .query('SELECT FullName, Email, Address, ProfilePic FROM Users WHERE UserId = @uid');
             res.json(result.recordset[0]);
         } catch (err) {
-            res.status(500).json({ error: err.message });
+            res.status(500).json({ message: 'Request failed. Please try again.' });
         }
     });
 

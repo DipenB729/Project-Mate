@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
+
+router.use(authenticate);
 
 // --- GET ALL NOTIFICATIONS FOR A USER ---
 router.get('/:userId', async (req, res) => {
@@ -9,7 +12,7 @@ router.get('/:userId', async (req, res) => {
         const result = await pool.request()
             .input('uid', sql.Int, req.params.userId)
             .query(`
-                SELECT 
+                SELECT
                     n.NotificationId, n.Type, n.Message, n.IsRead,
                     n.RelatedId, n.CreatedAt,
                     u.FullName AS SenderName, u.ProfilePic AS SenderPic
@@ -20,7 +23,7 @@ router.get('/:userId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -33,7 +36,7 @@ router.get('/unread-count/:userId', async (req, res) => {
             .query(`SELECT COUNT(*) AS count FROM Notifications WHERE UserId = @uid AND IsRead = 0`);
         res.json({ count: result.recordset[0].count });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -46,7 +49,7 @@ router.put('/mark-read/:userId', async (req, res) => {
             .query(`UPDATE Notifications SET IsRead = 1 WHERE UserId = @uid AND IsRead = 0`);
         res.json({ message: "Notifications marked as read" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -56,11 +59,14 @@ router.put('/mark-one/:notifId', async (req, res) => {
         const pool = await sql.connect(dbConfig);
         await pool.request()
             .input('nid', sql.Int, req.params.notifId)
-            .query(`UPDATE Notifications SET IsRead = 1 WHERE NotificationId = @nid`);
+            .input('uid', sql.Int, req.user.id)
+            .query(`UPDATE Notifications SET IsRead = 1 WHERE NotificationId = @nid AND UserId = @uid`);
         res.json({ message: "Marked as read" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
+
+router.param('userId', ownParam);
 
 module.exports = router;

@@ -1,9 +1,10 @@
+import { API, SERVER } from '../api/client';
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import axios from '../api/client';
 import '../styles/Home.css';
 
-const API = "http://localhost:5000/api";
+
 
 const Navbar = ({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) => {
     const navigate  = useNavigate();
@@ -24,7 +25,7 @@ const Navbar = ({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) => {
         axios.get(`${API}/user/details/${user.id}`)
             .then(res => {
                 if (res.data.ProfilePic)
-                    setProfilePic(`http://localhost:5000${res.data.ProfilePic}`);
+                    setProfilePic(`${SERVER}${res.data.ProfilePic}`);
             })
             .catch(() => {});
     }, [user.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -35,12 +36,12 @@ const Navbar = ({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) => {
 
         const fetchCounts = async () => {
             try {
-                const [notifRes, msgRes] = await Promise.all([
+                const [notifRes, msgRes] = await Promise.allSettled([
                     axios.get(`${API}/notifications/unread-count/${user.id}`),
                     axios.get(`${API}/messages/unread-count/${user.id}`),
                 ]);
-                setUnreadCount(notifRes.data.count || 0);
-                setMsgUnread(msgRes.data.count || 0);
+                if (notifRes.status === 'fulfilled') setUnreadCount(notifRes.value.data.count || 0);
+                if (msgRes.status === 'fulfilled') setMsgUnread(msgRes.value.data.count || 0);
             } catch {}
         };
 
@@ -54,7 +55,7 @@ const Navbar = ({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) => {
         if (!showBell) {
             try {
                 const res = await axios.get(`${API}/notifications/${user.id}`);
-                setNotifications(res.data);
+                setNotifications(Array.isArray(res.data) ? res.data : []);
                 // Mark all as read
                 if (unreadCount > 0) {
                     await axios.put(`${API}/notifications/mark-read/${user.id}`);
@@ -124,7 +125,7 @@ const Navbar = ({ isSidebarOpen = false, setIsSidebarOpen = () => {} }) => {
                         {isSidebarOpen ? '✖' : '☰'}
                     </button>
                     <div className="nav-right-section">
-                        <div className="notification-bell">🔔<span className="bell-badge">3</span></div>
+
                         <div className="profile-dropdown-container">
                             <img src={profilePic || `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || "U")}&background=fbbf24&color=0f172a&size=40`} alt="Profile"
                                 className="navbar-avatar" onClick={() => setShowDropdown(!showDropdown)} />

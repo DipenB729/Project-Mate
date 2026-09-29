@@ -1,5 +1,6 @@
+import { API } from '../../api/client';
 import React, { useState } from 'react';
-import axios from 'axios';
+import axios from '../../api/client';
 import { useNavigate, Link } from 'react-router-dom';
 import '../../styles/Login.css';  // Import your new CSS file
 
@@ -10,11 +11,11 @@ const Login = () => {
 
     const handleLogin = async (e) => {
         e.preventDefault();
-        setError(""); 
+        setError("");
 
         try {
-            const res = await axios.post('http://localhost:5000/api/login', formData);
-            
+            const res = await axios.post(`${API}/login`, formData);
+
             localStorage.setItem('token', res.data.token);
             localStorage.setItem('user', JSON.stringify(res.data.user));
 
@@ -23,7 +24,7 @@ const Login = () => {
             } else {
                 navigate('/student-home');
             }
-            
+
         } catch (err) {
             setError(err.response?.data?.message || "Invalid email or password");
         }
@@ -33,29 +34,29 @@ const Login = () => {
         <div className="login-container">
             <div className="login-card">
                 <h2 className="login-title">Project-Mate</h2>
-                
+
                 {error && <div className="error-message">{error}</div>}
 
                 <form onSubmit={handleLogin}>
                     <div className="input-group">
                         <label>Email Address</label>
-                        <input 
-                            type="email" 
+                        <input
+                            type="email"
                             className="login-input"
-                            placeholder="yourname@college.edu" 
-                            onChange={(e) => setFormData({...formData, email: e.target.value})} 
-                            required 
+                            placeholder="yourname@college.edu"
+                            onChange={(e) => setFormData({...formData, email: e.target.value})}
+                            required
                         />
                     </div>
 
                     <div className="input-group">
                         <label>Password</label>
-                        <input 
-                            type="password" 
+                        <input
+                            type="password"
                             className="login-input"
-                            placeholder="••••••••" 
-                            onChange={(e) => setFormData({...formData, password: e.target.value})} 
-                            required 
+                            placeholder="••••••••"
+                            onChange={(e) => setFormData({...formData, password: e.target.value})}
+                            required
                         />
                     </div>
 

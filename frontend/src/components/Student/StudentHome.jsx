@@ -1,8 +1,9 @@
+import { API, apiFetch, readList } from '../../api/client';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const S = {
   page: {
@@ -113,13 +114,13 @@ export default function StudentHome() {
   useEffect(() => {
     if (!user.id) return;
     // Load my skills
-    fetch(`${API}/student/my-skills/${user.id}`)
-      .then(r => r.json()).then(setMySkills).catch(() => {});
+    apiFetch(`${API}/student/my-skills/${user.id}`)
+      .then(readList).then(setMySkills).catch(() => {});
     // Load stats
     Promise.all([
-      fetch(`${API}/projects/my-projects/${user.id}`).then(r => r.json()),
-      fetch(`${API}/interests/my-applications/${user.id}`).then(r => r.json()),
-      fetch(`${API}/interests/my-team/${user.id}`).then(r => r.json()),
+      apiFetch(`${API}/projects/my-projects/${user.id}`).then(readList),
+      apiFetch(`${API}/interests/my-applications/${user.id}`).then(readList),
+      apiFetch(`${API}/interests/my-team/${user.id}`).then(readList),
     ]).then(([projs, apps, teams]) => {
       setStats({
         projects: projs.length || 0,

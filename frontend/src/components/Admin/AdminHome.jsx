@@ -1,28 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Navbar from '../Navbar';
+import client, { API } from '../../api/client';
 import '../../styles/Home.css';
-
-const AdminHome = () => {
-    // State to track sidebar toggle
+export default function AdminHome() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-    return (
-        <div className="admin-layout">
-            {/* Pass state and setter to Navbar */}
-            <Navbar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
-            
-            <main className={`admin-content ${!isSidebarOpen ? 'expanded' : ''}`}>
-                <h1>Admin Overview</h1>
-                <p>Welcome to the control center. Use the menu to manage the platform.</p>
-                
-                <div className="grid-container">
-                    <div className="card"><h3>Active Students</h3><h2>142</h2></div>
-                    <div className="card"><h3>Project Proposals</h3><h2>28</h2></div>
-                    <div className="card"><h3>Reports</h3><h2>2</h2></div>
-                </div>
-            </main>
-        </div>
-    );
-};
-
-export default AdminHome;
+    const [stats, setStats] = useState(null);
+    const [error, setError] = useState('');
+    useEffect(() => {
+        client.get(`${API}/projects/admin/stats`).then(res => setStats(res.data))
+            .catch(() => setError('Unable to load dashboard. Please refresh to retry.'));
+    }, []);
+    return <div className="admin-layout">
+        <Navbar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+        <main className={`admin-content ${!isSidebarOpen ? 'expanded' : ''}`}>
+            <h1>Admin Overview</h1>
+            {error && <p role="alert">{error}</p>}
+            {!stats && !error && <p>Loading dashboard...</p>}
+            {stats && <div className="grid-container">
+                <div className="card"><h3>Active Students</h3><h2>{stats.activeStudents}</h2></div>
+                <div className="card"><h3>Project Proposals</h3><h2>{stats.pendingProjects}</h2></div>
+                <div className="card"><h3>Approved Projects</h3><h2>{stats.approvedProjects}</h2></div>
+            </div>}
+        </main>
+    </div>;
+}

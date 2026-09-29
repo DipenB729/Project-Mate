@@ -1,10 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { sql, dbConfig } = require('../config/db');
+const { authenticate, requireRole, ownParam, actor } = require('../middleware/auth');
+
+router.use(authenticate, requireRole('Student'));
 
 // --- SEND CONNECT REQUEST ---
-router.post('/request', async (req, res) => {
+router.post('/request', actor('requesterId'), async (req, res) => {
     const { requesterId, receiverId } = req.body;
+    if (!Number.isSafeInteger(Number(receiverId)) || Number(receiverId) < 1 || Number(receiverId) === requesterId)
+        return res.status(400).json({ message: 'Choose another valid user.' });
     try {
         const pool = await sql.connect(dbConfig);
 
@@ -13,15 +18,15 @@ router.post('/request', async (req, res) => {
             .input('rid', sql.Int, requesterId)
             .input('rcv', sql.Int, receiverId)
             .query(`
-                SELECT * FROM Connections 
+                SELECT * FROM Connections
                 WHERE (RequesterId = @rid AND ReceiverId = @rcv)
                    OR (RequesterId = @rcv AND ReceiverId = @rid)
             `);
 
         if (check.recordset.length > 0) {
             const existing = check.recordset[0];
-            return res.status(400).json({ 
-                message: `Connection already ${existing.Status.toLowerCase()}` 
+            return res.status(400).json({
+                message: `Connection already ${existing.Status.toLowerCase()}`
             });
         }
 
@@ -50,20 +55,24 @@ router.post('/request', async (req, res) => {
 
         res.json({ message: "Connection request sent!" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- RESPOND TO CONNECT REQUEST (Accept / Reject) ---
 router.put('/respond/:connectionId', async (req, res) => {
-    const { status, requesterId, receiverId } = req.body; // status = 'Accepted' | 'Rejected'
+    const { status } = req.body;
+    if (!['Accepted', 'Rejected'].includes(status)) return res.status(400).json({ message: 'Invalid response status.' });
     try {
         const pool = await sql.connect(dbConfig);
 
-        await pool.request()
+        const updated = await pool.request()
+            .input('uid', sql.Int, req.user.id)
             .input('cid',    sql.Int,      req.params.connectionId)
             .input('status', sql.NVarChar, status)
-            .query(`UPDATE Connections SET Status = @status WHERE ConnectionId = @cid`);
+            .query(`UPDATE Connections SET Status = @status OUTPUT INSERTED.RequesterId, INSERTED.ReceiverId WHERE ConnectionId = @cid AND ReceiverId = @uid AND Status = 'Pending'`);
+        if (!updated.recordset.length) return res.status(409).json({ message: 'Request unavailable.' });
+        const { RequesterId: requesterId, ReceiverId: receiverId } = updated.recordset[0];
 
         // Notify the requester of the response
         const receiver = await pool.request()
@@ -87,7 +96,7 @@ router.put('/respond/:connectionId', async (req, res) => {
 
         res.json({ message: `Connection ${status.toLowerCase()}` });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -106,7 +115,7 @@ router.get('/status/:userId/:otherUserId', async (req, res) => {
             `);
         res.json(result.recordset[0] || null);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -117,7 +126,7 @@ router.get('/my-connections/:userId', async (req, res) => {
         const result = await pool.request()
             .input('uid', sql.Int, req.params.userId)
             .query(`
-                SELECT 
+                SELECT
                     c.ConnectionId, c.Status, c.CreatedAt,
                     u.UserId AS ConnectedUserId,
                     u.FullName, u.ProfilePic, u.Email
@@ -130,7 +139,7 @@ router.get('/my-connections/:userId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
@@ -141,7 +150,7 @@ router.get('/pending/:userId', async (req, res) => {
         const result = await pool.request()
             .input('uid', sql.Int, req.params.userId)
             .query(`
-                SELECT 
+                SELECT
                     c.ConnectionId, c.CreatedAt,
                     u.UserId AS RequesterId,
                     u.FullName, u.ProfilePic
@@ -152,22 +161,28 @@ router.get('/pending/:userId', async (req, res) => {
             `);
         res.json(result.recordset);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- DIRECT CONNECT (creates Accepted connection immediately, for project leads) ---
-router.post('/direct-connect', async (req, res) => {
+router.post('/direct-connect', actor('requesterId'), async (req, res) => {
     const { requesterId, receiverId } = req.body;
+    if (!Number.isSafeInteger(Number(receiverId)) || Number(receiverId) < 1 || Number(receiverId) === requesterId)
+        return res.status(400).json({ message: 'Choose another valid user.' });
     try {
         const pool = await sql.connect(dbConfig);
 
+        const permitted = await pool.request().input('lid', sql.Int, req.user.id).input('aid', sql.Int, receiverId)
+            .query(`SELECT TOP 1 i.InterestId FROM Interests i JOIN Projects p ON p.ProjectId = i.ProjectId
+                WHERE p.LeaderId = @lid AND i.ApplicantId = @aid AND i.Status IN ('Pending', 'Accepted')`);
+        if (!permitted.recordset.length) return res.status(403).json({ message: 'Only your project applicants can be connected directly.' });
         // Check if connection already exists
         const check = await pool.request()
             .input('rid', sql.Int, requesterId)
             .input('rcv', sql.Int, receiverId)
             .query(`
-                SELECT ConnectionId, Status FROM Connections 
+                SELECT ConnectionId, Status FROM Connections
                 WHERE (RequesterId = @rid AND ReceiverId = @rcv)
                    OR (RequesterId = @rcv AND ReceiverId = @rid)
             `);
@@ -209,8 +224,10 @@ router.post('/direct-connect', async (req, res) => {
 
         res.json({ message: `Connected with ${studentName}! You can now message each other.` });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
-module.exports = router;    
+router.param('userId', ownParam);
+
+module.exports = router;

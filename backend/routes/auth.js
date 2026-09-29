@@ -7,6 +7,8 @@ const { sql, dbConfig } = require('../config/db');
 // --- REGISTER ---
 router.post('/register', async (req, res) => {
     const { fullName, email, password } = req.body;
+    if (typeof fullName !== 'string' || !fullName.trim() || typeof email !== 'string' || !email.includes('@') || typeof password !== 'string' || password.length < 8)
+        return res.status(400).json({ message: 'Name, valid email and a password of at least 8 characters are required.' });
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
         const pool = await sql.connect(dbConfig);
@@ -26,23 +28,24 @@ router.post('/register', async (req, res) => {
 
         res.status(201).json({ message: "User registered successfully!" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 
 // --- LOGIN ---
 router.post('/login', async (req, res) => {
     const { email, password } = req.body;
+    if (typeof email !== 'string' || typeof password !== 'string') return res.status(400).json({ message: 'Email and password are required.' });
     try {
         const pool = await sql.connect(dbConfig);
         const result = await pool.request()
             .input('email', sql.NVarChar, email)
             .query(`
-                SELECT u.*, r.RoleName 
-                FROM Users u 
-                JOIN SystemRoles r ON u.RoleId = r.RoleId 
-                WHERE u.Email = @email 
-                AND u.IsActive = 1 
+                SELECT u.*, r.RoleName
+                FROM Users u
+                JOIN SystemRoles r ON u.RoleId = r.RoleId
+                WHERE u.Email = @email
+                AND u.IsActive = 1
                 AND u.IsDeleted = 0
             `);
 
@@ -65,7 +68,7 @@ router.post('/login', async (req, res) => {
 
         res.json({ token, user: { id: user.UserId, name: user.FullName, role: user.RoleName } });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(500).json({ message: 'Request failed. Please try again.' });
     }
 });
 

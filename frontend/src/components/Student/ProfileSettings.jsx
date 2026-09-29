@@ -1,8 +1,9 @@
+import { API, SERVER } from '../../api/client';
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import axios from '../../api/client';
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const S = {
   page: {
@@ -137,7 +138,7 @@ export default function ProfileSettings() {
           existingPic: res.data.ProfilePic || "",
         });
         setPreview(res.data.ProfilePic
-          ? `http://localhost:5000${res.data.ProfilePic}`
+          ? `${SERVER}${res.data.ProfilePic}`
           : null
         );
       })

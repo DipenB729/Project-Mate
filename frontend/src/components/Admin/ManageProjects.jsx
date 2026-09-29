@@ -1,8 +1,9 @@
+import { API } from '../../api/client';
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import axios from '../../api/client';
 import Navbar from '../Navbar';
 
-const API = "http://localhost:5000/api";
+
 
 const ManageProjects = () => {
     const [projects, setProjects]       = useState([]);
